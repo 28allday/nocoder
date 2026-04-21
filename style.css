@@ -1,0 +1,782 @@
+/* NO-CODER — theme-aware styling.
+
+   Backgrounds, foregrounds, borders, and popover/dialog/headerbar chrome are
+   derived from the user's active Omarchy theme via its `gtk.css`, which is
+   loaded in app.py at GTK_STYLE_PROVIDER_PRIORITY_THEME before this file.
+   The ProRes-orange accent, semantic states (success/danger/info/highlight),
+   and brand-critical bits are hardcoded — they're the app's identity and
+   should stay put across Kanagawa, Catppuccin, Tokyo Night, etc.
+
+   Fallback: if Omarchy isn't present or the theme file is missing, the
+   libadwaita defaults apply; the app still renders coherently. */
+
+/* Internal palette — cascades from the Omarchy-provided libadwaita tokens.
+   Existing rules throughout this file that reference @window_bg / @text_main /
+   @surface etc. transparently pick up whichever theme is active. */
+@define-color base          @window_bg_color;
+@define-color window_bg     @window_bg_color;
+@define-color surface       @view_bg_color;
+@define-color elevated      shade(@window_bg_color, 1.18);
+@define-color elevated_2    shade(@window_bg_color, 1.35);
+@define-color border_muted  alpha(@window_fg_color, 0.15);
+@define-color border_strong alpha(@window_fg_color, 0.25);
+@define-color text_main     @window_fg_color;
+@define-color text_muted    alpha(@window_fg_color, 0.72);
+@define-color text_dim      alpha(@window_fg_color, 0.55);
+@define-color text_faint    alpha(@window_fg_color, 0.38);
+
+/* Accent + semantic tokens — cascade from whatever Omarchy theme is active.
+   The synthesised theme CSS in app.py defines @accent_color, @destructive_bg_color,
+   @success_bg_color, @warning_bg_color, @error_bg_color from the theme's
+   `accent` + ANSI palette (color1 red / color2 green / color3 yellow / color4
+   blue). So nothing hardcoded here — the app adheres to the system theme. */
+@define-color accent        @accent_color;
+@define-color accent_soft   alpha(@accent_color, 0.14);
+@define-color accent_tint   alpha(@accent_color, 0.22);
+@define-color accent_ring   alpha(@accent_color, 0.38);
+@define-color accent_glow   alpha(@accent_color, 0.55);
+
+@define-color success       @success_bg_color;
+@define-color danger        @destructive_bg_color;
+@define-color info          @accent_color;
+@define-color highlight     @warning_bg_color;
+
+window.nocoder-window,
+window.nocoder-window > * {
+  background-color: @window_bg;
+  color: @text_main;
+  font-family: "Inter", "Adwaita Sans", "Cantarell", sans-serif;
+  font-size: 13px;
+}
+
+window.nocoder-window {
+  border-radius: 12px;
+}
+
+/* ---------------- Headerbar ---------------- */
+
+.nocoder-headerbar {
+  background-image: linear-gradient(to bottom, @elevated 0%, shade(@elevated, 0.92) 100%);
+  background-color: @elevated;
+  border-bottom: 1px solid @border_muted;
+  min-height: 46px;
+  padding: 0 10px;
+  color: @text_muted;
+}
+.nocoder-headerbar windowcontrols {
+  margin: 0 2px;
+}
+.nocoder-headerbar windowcontrols > button {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  margin: 0 3px;
+  border-radius: 999px;
+  background: transparent;
+  color: @text_muted;
+  border: none;
+  box-shadow: none;
+}
+.nocoder-headerbar windowcontrols > button:hover {
+  background-color: alpha(@text_main, 0.08);
+  color: @text_main;
+}
+.app-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: @text_main;
+}
+
+.app-logo {
+  min-width: 22px; min-height: 22px;
+  border-radius: 6px;
+  background-image: linear-gradient(135deg, @accent 0%, alpha(@accent, 0.67) 100%);
+  box-shadow: 0 0 0 1px @accent_ring, 0 2px 6px alpha(@accent, 0.22);
+  color: @window_bg;
+  padding: 3px;
+}
+
+.status-chip {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  border: 1px solid transparent;
+}
+.status-chip box { /* dot + label spacing */ }
+.status-chip .dot {
+  min-width: 6px; min-height: 6px;
+  border-radius: 999px;
+  margin-right: 6px;
+}
+.status-chip.idle     { color: @text_dim; background-color: alpha(@text_dim, 0.14); border-color: alpha(@text_dim, 0.2); }
+.status-chip.idle     .dot { background-color: @text_dim; }
+.status-chip.ready    { color: @success; background-color: alpha(@success, 0.14); border-color: alpha(@success, 0.2); }
+.status-chip.ready    .dot { background-color: @success; box-shadow: 0 0 6px @success; }
+.status-chip.encoding { color: @accent; background-color: @accent_soft; border-color: @accent_ring; }
+.status-chip.encoding .dot { background-color: @accent; box-shadow: 0 0 6px @accent; }
+.status-chip.done     { color: @info; background-color: alpha(@info, 0.14); border-color: alpha(@info, 0.2); }
+.status-chip.done     .dot { background-color: @info; box-shadow: 0 0 6px @info; }
+
+/* Search pill (custom SearchEntry frame) */
+.search-pill {
+  background-color: @surface;
+  border: 1px solid @border_muted;
+  border-radius: 999px;
+  padding: 0 12px;
+  min-height: 30px;
+  color: @text_dim;
+}
+.search-pill text,
+.search-pill entry {
+  background: transparent;
+  color: @text_main;
+  border: none;
+  padding: 0 6px;
+  min-height: 28px;
+  caret-color: @accent;
+  box-shadow: none;
+}
+.search-pill text placeholder,
+.search-pill entry placeholder {
+  color: @text_dim;
+  opacity: 1;
+}
+.search-pill .search-kbd {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: @text_dim;
+  padding: 1px 6px;
+  background-color: @border_muted;
+  border-radius: 4px;
+}
+
+/* Headerbar icon buttons (menu, sliders) */
+.icon-btn {
+  min-width: 32px; min-height: 32px;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  color: @text_muted;
+  border: none;
+  box-shadow: none;
+}
+.icon-btn:hover { background-color: alpha(@text_main, 0.08); color: @text_main; }
+.icon-btn:active { background-color: alpha(@text_main, 0.14); }
+
+/* ---------------- Panes ---------------- */
+
+.queue-pane {
+  background-color: @surface;
+  border-right: 1px solid @border_muted;
+}
+.settings-pane {
+  background-color: @window_bg;
+}
+.settings-pane scrolledwindow,
+.queue-pane scrolledwindow {
+  background: transparent;
+}
+
+.pane-header {
+  min-height: 42px;
+  padding: 0 16px;
+  border-bottom: 1px solid @border_muted;
+}
+.pane-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: @text_dim;
+  letter-spacing: 1.5px;
+}
+.pane-label.upper { }
+
+.count-chip {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  padding: 1px 10px;
+  background-color: @border_muted;
+  color: @text_main;
+  border-radius: 999px;
+  font-weight: 500;
+}
+.count-chip.secondary {
+  background-color: transparent;
+  color: @text_dim;
+  font-size: 10px;
+  padding: 1px 6px;
+}
+
+.encoder-chip {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: @text_faint;
+}
+
+/* ---------------- Queue action bar ---------------- */
+
+.action-bar {
+  padding: 10px 12px;
+  border-bottom: 1px solid @border_muted;
+}
+.muted-btn {
+  background-color: @elevated;
+  border: 1px solid @border_muted;
+  color: @text_main;
+  border-radius: 8px;
+  padding: 0 12px;
+  min-height: 30px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+}
+.muted-btn:hover { background-color: shade(@elevated, 1.1); }
+.muted-btn:disabled { opacity: 0.4; }
+.muted-btn.clear-btn { color: @text_dim; }
+.muted-btn.accent-outline {
+  color: @accent;
+  background-color: @accent_tint;
+  border-color: @accent_ring;
+}
+
+/* ---------------- File rows ---------------- */
+
+.queue-list {
+  background: transparent;
+  padding: 6px 8px;
+}
+.queue-list row {
+  background: transparent;
+  margin: 2px 0;
+  padding: 0;
+  border-radius: 8px;
+}
+.queue-list row.selected {
+  background-color: @accent_soft;
+}
+.queue-list row:selected,
+.queue-list row:selected:focus {
+  background-color: @accent_soft;
+}
+
+.file-row {
+  padding: 11px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+.file-row.selected {
+  background-color: @accent_soft;
+  border-color: @accent_ring;
+}
+.file-thumb {
+  min-width: 28px; min-height: 28px;
+  border-radius: 6px;
+  background-image: linear-gradient(135deg, @elevated_2 0%, @elevated 100%);
+  border: 1px solid @border_strong;
+  color: @text_dim;
+  padding: 5px;
+}
+.filename {
+  font-size: 13px;
+  font-weight: 500;
+  color: @text_main;
+  font-feature-settings: "tnum";
+}
+.file-meta {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: @text_dim;
+}
+.file-meta label.sep { color: @border_strong; }
+.file-meta label.alpha-mark { color: @accent; }
+.file-size {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: @text_muted;
+  font-feature-settings: "tnum";
+}
+.file-estout {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: @text_faint;
+  font-feature-settings: "tnum";
+}
+.file-progress progress,
+.file-progress trough {
+  min-height: 3px;
+  border-radius: 999px;
+}
+.file-progress trough {
+  background-color: @border_muted;
+  border: none;
+}
+.file-progress progress {
+  background-color: @accent;
+  background-image: none;
+  box-shadow: 0 0 8px alpha(@accent, 0.67);
+  border: none;
+}
+.file-progress {
+  margin-top: 6px;
+}
+
+/* Status dot */
+.status-dot {
+  min-width: 16px; min-height: 16px;
+  border-radius: 999px;
+  border: 1px solid @border_strong;
+  background: transparent;
+  padding: 2px;
+}
+.status-dot.queued  { border-color: @border_strong; }
+.status-dot.encoding { border-color: @accent; background-color: alpha(@accent, 0.2); color: @accent; }
+.status-dot.done    { border-color: @success; background-color: alpha(@success, 0.14); color: @success; }
+.status-dot.failed  { border-color: @danger;  background-color: alpha(@danger, 0.14);  color: @danger; }
+
+/* Per-row remove button — hidden until row hover. */
+button.file-row-remove {
+  opacity: 0;
+  min-width: 22px; min-height: 22px;
+  padding: 3px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: @text_dim;
+  transition: opacity 120ms, color 120ms, background-color 120ms;
+}
+button.file-row-remove image { -gtk-icon-size: 12px; }
+.queue-list row:hover button.file-row-remove,
+button.file-row-remove:focus {
+  opacity: 1;
+}
+button.file-row-remove:hover {
+  color: @danger;
+  background-color: alpha(@danger, 0.14);
+}
+button.file-row-remove:disabled {
+  opacity: 0;
+}
+
+/* Search-filter placeholder inside the queue list. */
+.queue-empty-matches {
+  color: @text_dim;
+  font-size: 12px;
+  padding: 20px 12px;
+}
+
+/* ---------------- Drop zone ---------------- */
+
+.drop-zone {
+  margin: 14px;
+  border: 2px dashed @border_strong;
+  border-radius: 14px;
+  padding: 32px;
+  color: @text_dim;
+  background-image:
+    repeating-linear-gradient(45deg,
+      transparent 0px, transparent 10px,
+      alpha(@text_main, 0.015) 10px, alpha(@text_main, 0.015) 20px);
+}
+.drop-icon {
+  min-width: 72px; min-height: 72px;
+  border-radius: 20px;
+  background-image: linear-gradient(135deg, @accent_ring 0%, alpha(@accent, 0.07) 100%);
+  border: 1px solid alpha(@accent, 0.33);
+  color: @accent;
+  padding: 16px;
+}
+.drop-heading {
+  font-size: 16px;
+  font-weight: 600;
+  color: @text_main;
+}
+.drop-sub {
+  font-size: 13px;
+  color: @text_dim;
+}
+.drop-sub .link {
+  color: @accent;
+  font-weight: 500;
+}
+.drop-hint {
+  font-size: 11px;
+  color: @text_faint;
+}
+.drop-hint .code {
+  font-family: "JetBrains Mono", monospace;
+}
+.drop-zone.drop-hover {
+  border-color: @accent;
+  background-color: @accent_soft;
+}
+
+/* ---------------- Settings sections ---------------- */
+
+.section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: @text_main;
+}
+.section-sublabel {
+  font-size: 11px;
+  color: @text_dim;
+}
+
+.profile-row {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid @border_muted;
+  background-color: @surface;
+  margin-bottom: 6px;
+}
+.profile-row.selected {
+  border-color: @accent;
+  background-color: alpha(@accent, 0.1);
+}
+.profile-row:hover { background-color: shade(@surface, 1.08); }
+.profile-row.selected:hover { background-color: alpha(@accent, 0.14); }
+.profile-radio-outer {
+  min-width: 16px; min-height: 16px;
+  border-radius: 999px;
+  border: 2px solid @text_faint;
+  background: transparent;
+  padding: 0;
+}
+.profile-radio-outer.selected {
+  border-color: @accent;
+  border-width: 5px;
+  background-color: @surface;
+}
+.profile-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: @text_main;
+}
+.profile-name .alpha-tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: @text_dim;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.profile-desc {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: @text_dim;
+}
+.profile-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: @accent;
+  background-color: alpha(@accent, 0.2);
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* Alpha toggle */
+.toggle-row {
+  padding: 10px 12px;
+  background-color: @surface;
+  border: 1px solid @border_muted;
+  border-radius: 8px;
+}
+.toggle-row.disabled {
+  opacity: 0.4;
+}
+.toggle-label {
+  font-size: 13px;
+  color: @text_main;
+  font-weight: 500;
+}
+.toggle-sub {
+  font-size: 11px;
+  color: @text_dim;
+}
+
+switch.alpha-switch {
+  min-width: 36px;
+  min-height: 20px;
+  border-radius: 999px;
+  background-color: @border_strong;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+switch.alpha-switch:checked {
+  background-color: @accent;
+}
+switch.alpha-switch slider {
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 999px;
+  background-color: #ffffff;
+  border: none;
+  box-shadow: 0 1px 3px alpha(#000000, 0.4);
+  margin: 0;
+}
+
+/* Naming dropdown */
+dropdown.nocoder-select,
+dropdown.nocoder-select > button {
+  min-height: 36px;
+  background-color: @surface;
+  border: 1px solid @border_muted;
+  border-radius: 8px;
+  color: @text_main;
+  padding: 0 12px;
+  font-size: 13px;
+  box-shadow: none;
+}
+dropdown.nocoder-select > button:hover { background-color: shade(@surface, 1.1); }
+dropdown.nocoder-select > button arrow { color: @text_dim; }
+
+/* Output folder row */
+.folder-row {
+  padding: 10px 12px;
+  background-color: @surface;
+  border: 1px solid @border_muted;
+  border-radius: 8px;
+}
+.folder-icon {
+  color: @accent;
+}
+.folder-path {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: @text_main;
+}
+button.folder-browse {
+  padding: 3px 10px;
+  min-height: 24px;
+  background-color: @elevated;
+  border: 1px solid @border_strong;
+  border-radius: 6px;
+  color: @text_muted;
+  font-size: 11px;
+  box-shadow: none;
+}
+button.folder-browse:hover { background-color: shade(@elevated, 1.1); color: @text_main; }
+
+/* Collapsible command preview */
+button.cmd-disclosure {
+  background: transparent;
+  border: none;
+  color: @text_main;
+  padding: 4px 2px;
+  box-shadow: none;
+  font-weight: 600;
+  font-size: 12px;
+}
+button.cmd-disclosure:hover { color: @text_main; background-color: alpha(@text_main, 0.05); }
+
+.cmd-box {
+  background-color: @base;
+  border: 1px solid @border_muted;
+  border-radius: 8px;
+  padding: 12px;
+  color: @text_muted;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+.cmd-box textview,
+.cmd-box textview text {
+  background: transparent;
+  color: @text_muted;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  caret-color: @accent;
+}
+
+/* ---------------- Footer ---------------- */
+
+.footer-bar {
+  min-height: 72px;
+  border-top: 1px solid @border_muted;
+  background-image: linear-gradient(to bottom, @window_bg 0%, shade(@window_bg, 0.9) 100%);
+  padding: 0 18px;
+}
+.footer-divider {
+  min-width: 1px; min-height: 28px;
+  background-color: @border_muted;
+}
+.stat-label {
+  font-size: 10px;
+  color: @text_dim;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.stat-value {
+  font-size: 15px;
+  color: @text_main;
+  font-weight: 600;
+  font-family: "JetBrains Mono", monospace;
+  font-feature-settings: "tnum";
+}
+.stat-value-sm {
+  font-size: 13px;
+  color: @text_main;
+  font-weight: 500;
+  font-family: "JetBrains Mono", monospace;
+  font-feature-settings: "tnum";
+}
+.stat-value.success { color: @success; }
+.stat-value.danger  { color: @danger; }
+.stat-arrow { color: @text_faint; }
+.stat-in    { color: @text_dim; }
+.stat-out   { color: @accent; }
+
+button.encode-cta {
+  min-height: 42px;
+  padding: 0 22px;
+  background-image: linear-gradient(to bottom, @accent 0%, shade(@accent, 0.88) 100%);
+  background-color: @accent;
+  border: 1px solid @accent;
+  color: @window_bg;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  box-shadow: 0 4px 14px @accent_glow, inset 0 1px 0 alpha(#ffffff, 0.2);
+}
+button.encode-cta:hover { background-image: linear-gradient(to bottom, shade(@accent, 1.08) 0%, @accent 100%); }
+button.encode-cta:disabled {
+  background-image: none;
+  background-color: @border_muted;
+  border-color: @border_strong;
+  color: @text_faint;
+  box-shadow: none;
+}
+
+button.cancel-btn {
+  min-height: 42px;
+  padding: 0 18px;
+  background-color: alpha(@danger, 0.13);
+  border: 1px solid @danger;
+  color: @danger;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+}
+button.cancel-btn:hover { background-color: alpha(@danger, 0.18); }
+
+button.reveal-btn {
+  min-height: 42px;
+  padding: 0 16px;
+  background: transparent;
+  border: 1px solid @border_strong;
+  color: @text_main;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: none;
+}
+button.reveal-btn:hover { background-color: alpha(@text_main, 0.05); }
+
+.overall-progress progress,
+.overall-progress trough {
+  min-height: 6px;
+  border-radius: 999px;
+}
+.overall-progress trough {
+  background-color: @border_muted;
+  border: none;
+}
+.overall-progress progress {
+  background-image: linear-gradient(to right, alpha(@accent, 0.67) 0%, @accent 100%);
+  border: none;
+}
+
+.progress-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  color: @text_main;
+}
+.progress-title .idx { color: @text_dim; }
+.progress-title .pct { color: @accent; font-weight: 600; }
+
+.progress-status {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: @text_dim;
+}
+.progress-status .ok   { color: @success; }
+.progress-status .fail { color: @danger; }
+
+/* Scrollbars: keep slim and subtle */
+scrollbar {
+  background: transparent;
+  border: none;
+}
+scrollbar slider {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 8px;
+  background-color: @border_strong;
+}
+scrollbar slider:hover { background-color: @border_strong; }
+
+/* ---------------- Dialogs & popovers ---------------- */
+/* The named-colour overrides above handle most of the theming. The rules
+   below nudge a few surfaces (border radius, spacing, hover affordances) that
+   libadwaita doesn't derive cleanly from tokens alone. */
+
+window.messagedialog,
+window.messagedialog .dialog-vbox {
+  background-color: @window_bg;
+  color: @text_main;
+}
+window.messagedialog .dialog-vbox {
+  border-radius: 12px;
+}
+window.messagedialog label.title {
+  color: @text_main;
+  font-weight: 600;
+}
+window.messagedialog label.body {
+  color: @text_muted;
+}
+
+popover > contents,
+popover.menu > contents {
+  background-color: @window_bg;
+  border: 1px solid @border_muted;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+popover modelbutton,
+popover > contents button {
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: @text_main;
+  background: transparent;
+}
+popover modelbutton:hover,
+popover > contents button:hover {
+  background-color: alpha(@text_main, 0.08);
+}
+popover modelbutton:active,
+popover modelbutton:selected,
+popover > contents button:active {
+  background-color: @accent_soft;
+  color: @text_main;
+}
+
+/* Gtk.FileDialog / legacy file chooser — only reached when GTK_USE_PORTAL=0
+   routes the picker through our in-process widgets. */
+filechooser {
+  background-color: @window_bg;
+  color: @text_main;
+}
+filechooser placessidebar {
+  background-color: @surface;
+}
+filechooser placessidebar row:selected {
+  background-color: @accent_soft;
+  color: @text_main;
+}

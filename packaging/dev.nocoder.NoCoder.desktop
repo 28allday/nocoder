@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=NO-CODER
+GenericName=Video Transcoder
+Comment=Batch convert videos to Apple ProRes .mov
+Exec=@LAUNCHER@ %F
+Icon=dev.nocoder.NoCoder
+Terminal=false
+Categories=AudioVideo;
+StartupWMClass=dev.nocoder.NoCoder
+MimeType=video/mp4;video/quicktime;video/x-matroska;video/x-msvideo;video/webm;video/x-m4v;video/mp2t;
+Keywords=prores;ffmpeg;transcode;convert;video;
