@@ -15,6 +15,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("GObject", "2.0")
 from gi.repository import GObject, Gtk, Pango
 
+from .config import load_config
 from .data import PROFILES, PROFILES_BY_ID
 from .encoder import format_preview_command
 
@@ -68,6 +69,57 @@ class Settings:
             self.profile, self.alpha, self.naming, self.out_dir,
             self.audio_bits, self.auto_reveal,
         )
+
+    def to_persistable(self) -> dict:
+        """Subset of fields that survives across launches.
+
+        Excludes `alpha` because the alpha toggle is conditional on the
+        chosen profile (it auto-clears when a non-4444 profile is selected),
+        so persisting it across launches creates more confusion than value.
+        """
+        return {
+            "profile": self.profile,
+            "naming": self.naming,
+            "out_dir": self.out_dir,
+            "audio_bits": self.audio_bits,
+            "auto_reveal": self.auto_reveal,
+        }
+
+
+def load_persisted_settings() -> Settings:
+    """Construct a Settings populated from `~/.config/nocoder/config.json`.
+
+    Each field is validated against its allowed range; an out-of-range or
+    missing entry falls back to the Settings constructor default.
+    """
+    data = load_config()
+
+    profile = data.get("profile")
+    if profile not in PROFILES_BY_ID:
+        profile = "hq"
+
+    naming = data.get("naming")
+    if naming not in ("keep", "suffix"):
+        naming = "suffix"
+
+    audio_bits = data.get("audio_bits")
+    if audio_bits not in (16, 24):
+        audio_bits = 16
+
+    out_dir = data.get("out_dir")
+    if not isinstance(out_dir, str) or not out_dir.strip():
+        out_dir = ""
+
+    auto_reveal = bool(data.get("auto_reveal", False))
+
+    return Settings(
+        profile=profile,
+        alpha=False,
+        naming=naming,
+        out_dir=out_dir,
+        audio_bits=audio_bits,
+        auto_reveal=auto_reveal,
+    )
 
 
 class SettingsPane(Gtk.Box):

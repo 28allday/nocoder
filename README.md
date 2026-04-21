@@ -68,11 +68,23 @@ Removes the installed app tree, launcher, desktop entry, all six icon sizes, the
 
 ## Configuration
 
-`~/.config/nocoder/config.json` — currently just `{"hwaccel": "cuda" | "qsv" | "vaapi" | "none"}`. Edit by hand to override the auto-probed choice.
+`~/.config/nocoder/config.json` is read at launch and merged on every settings change. All keys are optional:
+
+```json
+{
+  "hwaccel":     "cuda" | "qsv" | "vaapi" | "none",
+  "profile":     "proxy" | "lt" | "standard" | "hq" | "4444" | "4444xq",
+  "naming":      "keep" | "suffix",
+  "out_dir":     "/absolute/path/to/output/folder",
+  "audio_bits":  16 | 24,
+  "auto_reveal": true | false
+}
+```
+
+You can edit by hand to override the auto-probed `hwaccel` or to seed defaults; everything else just reflects what you've picked in the UI most recently.
 
 ## Known gaps
 
-- No persistence for last-used output folder / profile (resets to defaults each launch).
 - "Reveal in Files" opens the output folder but doesn't *select* the specific file.
 - Per-row remove button isn't keyboard-accessible (mouse-hover only, by design — keeps tab order clean).
 - No live theme-change pickup — theme swaps apply on next launch, not immediately.

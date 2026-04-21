@@ -11,18 +11,15 @@ config is missing, the first encode will lazily re-probe and cache.
 """
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import threading
-from pathlib import Path
 from typing import Optional
 
-CONFIG_PATH = (
-    Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
-    / "nocoder"
-    / "config.json"
-)
+from .config import load_config, update_config
+
+# Re-exported for backward compatibility — users may have referenced this
+# constant. Kept as a thin alias to the shared config module.
+from .config import CONFIG_PATH  # noqa: F401
 
 # Ordered by vendor preference: NVIDIA > Intel > AMD/generic. ffmpeg silently
 # falls back to CPU decode when the source codec can't be GPU-decoded (MJPEG,
@@ -65,11 +62,7 @@ def probe_best_hwaccel() -> Optional[str]:
 
 def save_hwaccel(hw: Optional[str]) -> None:
     """Persist the selected hwaccel. ``None`` means CPU decode."""
-    try:
-        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps({"hwaccel": hw or "none"}, indent=2) + "\n")
-    except OSError:
-        pass
+    update_config({"hwaccel": hw or "none"})
 
 
 class _Sentinel:
@@ -77,14 +70,11 @@ class _Sentinel:
 
 
 def _read_configured_hwaccel():
-    """Return the stored hwaccel, None (CPU), or MISSING (no config yet)."""
-    if not CONFIG_PATH.exists():
+    """Return the stored hwaccel, None (CPU), or MISSING (no entry yet)."""
+    data = load_config()
+    if "hwaccel" not in data:
         return _Sentinel.MISSING
-    try:
-        data = json.loads(CONFIG_PATH.read_text())
-    except (OSError, json.JSONDecodeError):
-        return _Sentinel.MISSING
-    hw = data.get("hwaccel")
+    hw = data["hwaccel"]
     if hw in (None, "", "none"):
         return None
     return hw if hw in _CANDIDATES else None

@@ -39,7 +39,8 @@ from .encoder import (
 )
 from .footer import Footer
 from .queue_pane import FileEntry, QueuePane
-from .settings_pane import Settings, SettingsPane
+from .config import update_config
+from .settings_pane import Settings, SettingsPane, load_persisted_settings
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 880
@@ -65,7 +66,7 @@ class MainWindow(Adw.ApplicationWindow):
         self._selected_id: Optional[str] = None
         self._state: str = "empty"
         self._encoder_kind = detect_prores_encoder()
-        self._settings = Settings()
+        self._settings = load_persisted_settings()
         self._ensure_out_dir()
         self._encode_thread: Optional[threading.Thread] = None
         self._cancel_event: Optional[threading.Event] = None
@@ -279,6 +280,10 @@ class MainWindow(Adw.ApplicationWindow):
             overall=self._overall_progress(),
             current_idx=self._current_idx,
         )
+        # Persist the new state across launches. Cheap (single small JSON
+        # file write) and idempotent — if nothing actually changed we still
+        # round-trip the same dict, no harm.
+        update_config(self._settings.to_persistable())
 
     def _ensure_out_dir(self) -> None:
         if not self._settings.out_dir:
