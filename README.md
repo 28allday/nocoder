@@ -2,10 +2,6 @@
 
 A native GTK4 + libadwaita batch transcoder for Omarchy. Drop video files (or whole camera cards) onto the window, choose a ProRes profile, hit Encode. Output is editorial-ready Apple ProRes `.mov` ready for DaVinci Resolve, Premiere, FCP, Avid.
 
-The brand is the **NO SIGNAL** circle — every other colour follows whichever Omarchy theme you have active.
-
-![drop zone with the NO SIGNAL logo](assets/logo.png)
-
 ## Features
 
 - **Real ffmpeg encode** — `prores_ks` (with fallback to plain `prores`), live progress bar parsed from `-progress pipe:1`, cancelable, serial queue with disk-space pre-check.
