@@ -299,12 +299,44 @@ windowrule = size 1280 880, match:class ^(dev\\.nocoder\\.NoCoder)$
 $MARK_END
 EOF
 
-if command -v hyprctl >/dev/null 2>&1 && [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
-  say "Reloading Hyprland"
-  hyprctl reload >/dev/null
-else
-  warn "hyprctl unavailable or Hyprland not running — rules will load on next session."
+# Pick up the new windowrules. Hyprland auto-reloads on file save in most
+# cases, but an atomic `mv` over the existing file can miss the inotify
+# watcher on some setups — plus the user might have run this from SSH/TTY
+# where $HYPRLAND_INSTANCE_SIGNATURE isn't set. So we try every angle:
+#
+# 1. Find the live Hyprland instance socket (works from SSH too — we only
+#    need *any* one running session for this user).
+# 2. Explicit `hyprctl -i $inst reload`; silent no-op if nothing's running.
+# 3. Touch the conf so Hyprland's file watcher fires even if reload was
+#    missed.
+#
+# If all three fail (e.g. Hyprland isn't running at all), the rules will
+# take effect next time Hyprland starts — still correct, just not instant.
+if command -v hyprctl >/dev/null 2>&1; then
+  HYPR_INST=""
+  if [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]]; then
+    HYPR_INST="$HYPRLAND_INSTANCE_SIGNATURE"
+  else
+    # Pick the first live instance socket from $XDG_RUNTIME_DIR/hypr/.
+    hypr_root="${XDG_RUNTIME_DIR:-/run/user/$UID}/hypr"
+    shopt -s nullglob
+    for sock in "$hypr_root"/*/.socket.sock; do
+      inst_dir="${sock%/.socket.sock}"
+      HYPR_INST="${inst_dir##*/}"
+      break
+    done
+    shopt -u nullglob
+  fi
+  if [[ -n "$HYPR_INST" ]]; then
+    say "Reloading Hyprland (instance $HYPR_INST)"
+    HYPRLAND_INSTANCE_SIGNATURE="$HYPR_INST" hyprctl reload >/dev/null 2>&1 || warn "hyprctl reload returned an error — try 'hyprctl reload' manually if rules don't take effect."
+  else
+    warn "No running Hyprland instance detected — windowrules will load on next Hyprland session."
+  fi
 fi
+# Belt-and-braces: update mtime so Hyprland's inotify-based auto-reload
+# notices the change if the explicit reload above was somehow a no-op.
+touch "$HYPR_CONF" 2>/dev/null || true
 
 # Walker caches its app list — restart so new installs show up immediately.
 # (Omarchy ships a helper that restarts elephant.service + walker in one go.)
@@ -323,6 +355,11 @@ ${GREEN}NO-CODER installed.${RESET}
  ${DIM}•${RESET} Windowrules appended to $HYPR_CONF
 
 Open the walker (Super+Space) and search for "NO-CODER".
+
+If the window opens fullscreen instead of floating centered at 1280×880,
+the Hyprland reload didn't pick up our rules — run this once to fix:
+    hyprctl reload
+
 Your git clone is no longer needed — feel free to delete it, or keep it to
 'git pull && bash install.sh' for updates.
 EOF
