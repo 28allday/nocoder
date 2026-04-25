@@ -12,7 +12,7 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 HICOLOR_DIR="$HOME/.local/share/icons/hicolor"
 INSTALL_DIR="$HOME/.local/share/nocoder"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/nocoder"
-HYPR_CONF="$HOME/.config/hypr/windows.conf"
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 
 MARK_BEGIN="# >>> nocoder windowrules begin"
 MARK_END="# <<< nocoder windowrules end"

@@ -22,7 +22,14 @@ BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
 HICOLOR_DIR="$HOME/.local/share/icons/hicolor"
 INSTALL_DIR="$HOME/.local/share/nocoder"
-HYPR_CONF="$HOME/.config/hypr/windows.conf"
+# Append the windowrules block to hyprland.conf because that's the file
+# Hyprland actually reads. Omarchy's `~/.config/hypr/hyprland.conf` sources
+# its own defaults plus the user's `bindings.conf` / `monitors.conf` / etc.,
+# but it does NOT auto-source a `~/.config/hypr/windows.conf` — Omarchy's
+# windows.conf lives under `~/.local/share/omarchy/default/hypr/windows.conf`,
+# which we must not modify (it's overwritten by `omarchy-update`). Writing
+# our rules to the user's hyprland.conf is the simplest, idempotent path.
+HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
 
 MARK_BEGIN="# >>> nocoder windowrules begin"
 MARK_END="# <<< nocoder windowrules end"
