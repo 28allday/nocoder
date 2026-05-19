@@ -591,6 +591,40 @@ button.cmd-disclosure:hover { color: @text_main; background-color: alpha(@text_m
   caret-color: @accent;
 }
 
+/* ---------------- System pane (CPU visualizer) ---------------- */
+
+.system-pane {
+  border-top: 1px solid @border_muted;
+  background-color: @window_bg;
+  padding: 4px 18px 6px 18px;
+}
+.system-pane-header {
+  min-height: 22px;
+}
+.system-pane-toggle {
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0 4px;
+  color: @text_dim;
+}
+.system-pane-toggle:hover { color: @text_main; }
+.system-pane-title {
+  font-size: 10px;
+  color: @text_dim;
+  letter-spacing: 1px;
+  font-weight: 600;
+}
+.system-pane-agg {
+  font-size: 11px;
+  color: @text_muted;
+  font-family: "JetBrains Mono", monospace;
+  font-feature-settings: "tnum";
+}
+.cpu-bar-area {
+  color: @accent;
+  margin-top: 4px;
+}
+
 /* ---------------- Footer ---------------- */
 
 .footer-bar {

@@ -12,7 +12,8 @@ Schema (all keys optional):
         "profile": "hq",
         "naming":  "suffix" | "keep",
         "audio_bits": 16 | 24,
-        "auto_reveal": false
+        "auto_reveal": false,
+        "cpu_pane_expanded": true
     }
 """
 from __future__ import annotations

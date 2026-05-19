@@ -9,7 +9,8 @@ A native GTK4 + libadwaita batch transcoder for Omarchy. Drop video files (or wh
 - **Theme-aware** — palette tracks the active Omarchy theme on every launch (parses `colors.toml` / `ghostty.conf` / `alacritty.toml` / `kitty.conf` in priority order). 34 stock + custom themes verified.
 - **Pro camera ready** — `.MXF` from Canon XF / Sony XDCAM / Panasonic AVC-Intra, with proxy-directory pruning so dropping a Sony XAVC card maps only the masters in `CLIP/` and not the low-res duplicates in `SUB/`.
 - **Multi-track audio preserved** — Canon C300/C500 records 4 mono PCM streams; all four land in the output `.mov` as separate tracks. Optional 24-bit toggle for pro delivery.
-- **Live encode-speed indicator** — footer shows real `1.5×` throughput from ffmpeg and refines the ETA from actual measured rate, not a fixed heuristic.
+- **Live encode-speed indicator** — footer shows real `1.5×` throughput from ffmpeg and refines the ETA from actual measured rate, not a fixed heuristic. After the batch finishes, the footer also reports total wall time alongside succeeded / failed / output size.
+- **Per-core CPU visualizer** — collapsible btop-style pane between the queue and the footer, polling `/proc/stat` once a second and painting one vertical bar per logical core in the live theme accent. Useful for seeing at a glance whether the chosen profile / hwaccel combo is saturating the box or leaving headroom. Expand/collapse state persists across launches.
 - **Hyprland-aware install** — registers a `.desktop` entry with the walker, installs the icon at six hicolor sizes, appends a windowrule that floats and centres the app at 1280×880.
 
 ## Supported source formats
@@ -72,12 +73,13 @@ Removes the installed app tree, launcher, desktop entry, all six icon sizes, the
 
 ```json
 {
-  "hwaccel":     "cuda" | "qsv" | "vaapi" | "none",
-  "profile":     "proxy" | "lt" | "standard" | "hq" | "4444" | "4444xq",
-  "naming":      "keep" | "suffix",
-  "out_dir":     "/absolute/path/to/output/folder",
-  "audio_bits":  16 | 24,
-  "auto_reveal": true | false
+  "hwaccel":            "cuda" | "qsv" | "vaapi" | "none",
+  "profile":            "proxy" | "lt" | "standard" | "hq" | "4444" | "4444xq",
+  "naming":             "keep" | "suffix",
+  "out_dir":            "/absolute/path/to/output/folder",
+  "audio_bits":         16 | 24,
+  "auto_reveal":        true | false,
+  "cpu_pane_expanded":  true | false
 }
 ```
 

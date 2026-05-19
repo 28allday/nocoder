@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import shutil
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -39,8 +40,9 @@ from .encoder import (
 )
 from .footer import Footer
 from .queue_pane import FileEntry, QueuePane
-from .config import update_config
+from .config import load_config, update_config
 from .settings_pane import Settings, SettingsPane, load_persisted_settings
+from .system_pane import SystemPane
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 880
@@ -73,6 +75,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._active_job: Optional[EncodeJob] = None
         self._current_idx: int = 0
         self._current_speed: Optional[float] = None
+        self._encode_start_mono: Optional[float] = None
+        self._encode_elapsed: Optional[float] = None
 
         # Root layout
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -98,6 +102,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._settings_pane.connect("settings-changed", lambda *_: self._on_settings_changed())
         self._settings_pane.connect("choose-folder-requested", lambda *_: self._open_out_dir_dialog())
         split.append(self._settings_pane)
+
+        cpu_pane_expanded = bool(load_config().get("cpu_pane_expanded", True))
+        self._system_pane = SystemPane(initial_expanded=cpu_pane_expanded)
+        root.append(self._system_pane)
 
         self._footer = Footer()
         self._footer.connect("encode-requested", lambda *_: self._start_encode())
@@ -253,6 +261,7 @@ class MainWindow(Adw.ApplicationWindow):
             profile_id=self._settings.profile,
             overall=self._overall_progress(),
             current_idx=self._current_idx,
+            elapsed=self._encode_elapsed,
         )
 
     def _overall_progress(self) -> float:
@@ -512,6 +521,8 @@ class MainWindow(Adw.ApplicationWindow):
         self._state = "encoding"
         self._current_idx = 0
         self._cancel_event = threading.Event()
+        self._encode_start_mono = time.monotonic()
+        self._encode_elapsed = None
         self._refresh_all()
 
         self._encode_thread = threading.Thread(target=self._encode_worker, daemon=True)
@@ -651,11 +662,14 @@ class MainWindow(Adw.ApplicationWindow):
             self._state = "ready"
         else:
             self._state = "complete"
+            if self._encode_start_mono is not None:
+                self._encode_elapsed = time.monotonic() - self._encode_start_mono
             # If at least one file landed AND the user opted in, pop the
             # output folder open. Skip on cancel (intent unclear) and on
             # full-batch failure (annoying to be shown an empty folder).
             if self._settings.auto_reveal and any(f.status == "done" for f in self._files):
                 self._reveal_output_dir()
+        self._encode_start_mono = None
         self._refresh_all()
         return False
 

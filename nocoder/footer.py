@@ -43,6 +43,7 @@ class Footer(Gtk.Box):
         self._overall = 0.0
         self._current_idx = 0
         self._speed: Optional[float] = None
+        self._elapsed: Optional[float] = None
 
         self._build()
 
@@ -50,13 +51,15 @@ class Footer(Gtk.Box):
 
     def update(self, state: str, files: list[FileEntry], profile_id: str,
                overall: float, current_idx: int,
-               speed: Optional[float] = None) -> None:
+               speed: Optional[float] = None,
+               elapsed: Optional[float] = None) -> None:
         self._state = state
         self._files = files
         self._profile_id = profile_id
         self._overall = max(0.0, min(1.0, overall))
         self._current_idx = current_idx
         self._speed = speed
+        self._elapsed = elapsed
         self._render()
 
     # ---------- build ----------
@@ -161,6 +164,9 @@ class Footer(Gtk.Box):
         stats.append(_divider())
         self._stat_out = _make_stat("Output size", "—", small=True)
         stats.append(self._stat_out.root)
+        stats.append(_divider())
+        self._stat_total_time = _make_stat("Total time", "—", small=True, with_clock=True)
+        stats.append(self._stat_total_time.root)
         box.append(stats)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -266,6 +272,10 @@ class Footer(Gtk.Box):
         else:
             self._stat_fail.value.remove_css_class("danger")
         self._stat_out.value.set_text(format_bytes(total_out) if total_out else "—")
+        if self._elapsed is not None and self._elapsed > 0:
+            self._stat_total_time.value.set_text(format_duration(self._elapsed))
+        else:
+            self._stat_total_time.value.set_text("—")
 
 
 # ---------- helpers ----------
