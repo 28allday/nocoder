@@ -17,7 +17,14 @@ from gi.repository import GObject, Gtk, Pango
 
 from .config import load_config
 from .data import PROFILES, PROFILES_BY_ID
-from .encoder import format_preview_command
+from .encoder import SequenceSpec, format_preview_command
+
+
+def _fmt_fps_preset(v: float) -> str:
+    """Compact preset label: 24 / 25 / 23.976 / 29.97."""
+    if v == int(v):
+        return f"{int(v)} fps"
+    return f"{v:g} fps"
 
 
 def _resolve_theme_hex(widget: Gtk.Widget, name: str, fallback: str) -> str:
@@ -41,7 +48,10 @@ def _resolve_theme_hex(widget: Gtk.Widget, name: str, fallback: str) -> str:
 
 
 class Settings:
-    __slots__ = ("profile", "alpha", "naming", "out_dir", "audio_bits", "auto_reveal")
+    __slots__ = (
+        "profile", "alpha", "naming", "out_dir", "audio_bits",
+        "auto_reveal", "sequence_fps",
+    )
 
     def __init__(
         self,
@@ -51,6 +61,7 @@ class Settings:
         out_dir: str = "",
         audio_bits: int = 16,
         auto_reveal: bool = False,
+        sequence_fps: float = 24.0,
     ) -> None:
         self.profile = profile
         self.alpha = alpha
@@ -63,11 +74,15 @@ class Settings:
         # batch completes. Convenient for one-shot transcodes; off by default
         # so the app doesn't surprise users mid-workflow.
         self.auto_reveal = auto_reveal
+        # Applied to every image-sequence job added via "Add image sequence
+        # folder…". 24 matches cinematic default; common alternates exposed
+        # as a preset dropdown next to the spin button.
+        self.sequence_fps = sequence_fps
 
     def snapshot(self) -> "Settings":
         return Settings(
             self.profile, self.alpha, self.naming, self.out_dir,
-            self.audio_bits, self.auto_reveal,
+            self.audio_bits, self.auto_reveal, self.sequence_fps,
         )
 
     def to_persistable(self) -> dict:
@@ -83,6 +98,7 @@ class Settings:
             "out_dir": self.out_dir,
             "audio_bits": self.audio_bits,
             "auto_reveal": self.auto_reveal,
+            "sequence_fps": self.sequence_fps,
         }
 
 
@@ -112,6 +128,14 @@ def load_persisted_settings() -> Settings:
 
     auto_reveal = bool(data.get("auto_reveal", False))
 
+    raw_fps = data.get("sequence_fps", 24.0)
+    try:
+        sequence_fps = float(raw_fps)
+    except (TypeError, ValueError):
+        sequence_fps = 24.0
+    if not (0 < sequence_fps <= 240):
+        sequence_fps = 24.0
+
     return Settings(
         profile=profile,
         alpha=False,
@@ -119,6 +143,7 @@ def load_persisted_settings() -> Settings:
         out_dir=out_dir,
         audio_bits=audio_bits,
         auto_reveal=auto_reveal,
+        sequence_fps=sequence_fps,
     )
 
 
@@ -140,6 +165,7 @@ class SettingsPane(Gtk.Box):
         self._encoder_kind = encoder_kind
         self._encoding_locked = False
         self._first_file_name: Optional[str] = None
+        self._first_file_sequence: Optional[SequenceSpec] = None
         self._profile_buttons: dict[str, Gtk.ToggleButton] = {}
         self._profile_rows: dict[str, Gtk.Widget] = {}
         self._profile_radios: dict[str, Gtk.Widget] = {}
@@ -167,11 +193,20 @@ class SettingsPane(Gtk.Box):
             self._audio_bits_switch.set_sensitive(not encoding)
         if hasattr(self, "_auto_reveal_switch"):
             self._auto_reveal_switch.set_sensitive(not encoding)
+        if hasattr(self, "_seq_fps_spin"):
+            self._seq_fps_spin.set_sensitive(not encoding)
+        if hasattr(self, "_seq_fps_dropdown"):
+            self._seq_fps_dropdown.set_sensitive(not encoding)
         self._naming_dropdown.set_sensitive(not encoding)
         self._browse_btn.set_sensitive(not encoding)
 
-    def set_first_file_name(self, name: Optional[str]) -> None:
+    def set_first_file_name(
+        self,
+        name: Optional[str],
+        sequence: Optional[SequenceSpec] = None,
+    ) -> None:
         self._first_file_name = name
+        self._first_file_sequence = sequence
         self._update_cmd_preview()
 
     def refresh(self) -> None:
@@ -196,6 +231,12 @@ class SettingsPane(Gtk.Box):
             if self._naming_handler_id:
                 self._naming_dropdown.handler_unblock(self._naming_handler_id)
         self._folder_path.set_text(self._settings.out_dir)
+        if hasattr(self, "_seq_fps_spin"):
+            self._seq_fps_spin.handler_block(self._seq_fps_spin_handler)
+            try:
+                self._seq_fps_spin.set_value(self._settings.sequence_fps)
+            finally:
+                self._seq_fps_spin.handler_unblock(self._seq_fps_spin_handler)
         self._update_cmd_preview()
 
     # ---------- header ----------
@@ -237,6 +278,7 @@ class SettingsPane(Gtk.Box):
         body.append(self._build_profile_section())
         body.append(self._build_alpha_section())
         body.append(self._build_audio_bits_section())
+        body.append(self._build_sequence_fps_section())
         body.append(self._build_auto_reveal_section())
         body.append(self._build_naming_section())
         body.append(self._build_folder_section())
@@ -435,6 +477,87 @@ class SettingsPane(Gtk.Box):
         self.emit("settings-changed")
         return False
 
+    # ---------- sequence frame rate ----------
+
+    # Common cinema / broadcast / streaming frame rates. The spin button lets
+    # the user enter anything in (0, 240], but most users pick one of these.
+    _SEQ_FPS_PRESETS: tuple[float, ...] = (
+        23.976, 24.0, 25.0, 29.97, 30.0, 48.0, 50.0, 59.94, 60.0,
+    )
+
+    def _build_sequence_fps_section(self) -> Gtk.Widget:
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        label = Gtk.Label(label="Sequence frame rate", xalign=0)
+        label.add_css_class("section-label")
+        section.append(label)
+        sub = Gtk.Label(xalign=0)
+        sub.add_css_class("section-sublabel")
+        sub.set_wrap(True)
+        sub.set_max_width_chars(50)
+        sub.set_label(
+            "Applied to every image-sequence job. Pick a preset or enter a "
+            "custom rate (1–240 fps)."
+        )
+        section.append(sub)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+
+        spin = Gtk.SpinButton.new_with_range(1.0, 240.0, 1.0)
+        spin.set_digits(3)
+        spin.set_climb_rate(1.0)
+        spin.set_value(self._settings.sequence_fps)
+        spin.set_hexpand(True)
+        self._seq_fps_spin = spin
+        self._seq_fps_spin_handler = spin.connect("value-changed", self._on_seq_fps_changed)
+        row.append(spin)
+
+        labels = [_fmt_fps_preset(v) for v in self._SEQ_FPS_PRESETS]
+        model = Gtk.StringList.new(labels)
+        dropdown = Gtk.DropDown.new(model, None)
+        dropdown.add_css_class("nocoder-select")
+        # Default the dropdown to "no preset highlighted" by selecting the
+        # closest match if one exists, else leaving it at index 0.
+        try:
+            preset_idx = self._SEQ_FPS_PRESETS.index(
+                min(self._SEQ_FPS_PRESETS, key=lambda v: abs(v - self._settings.sequence_fps))
+            )
+        except ValueError:
+            preset_idx = 1  # 24.0
+        dropdown.set_selected(preset_idx)
+        self._seq_fps_dropdown = dropdown
+        self._seq_fps_dropdown_handler = dropdown.connect(
+            "notify::selected", self._on_seq_fps_preset_changed,
+        )
+        row.append(dropdown)
+
+        section.append(row)
+        return section
+
+    def _on_seq_fps_changed(self, spin: Gtk.SpinButton) -> None:
+        new = float(spin.get_value())
+        if abs(new - self._settings.sequence_fps) < 1e-4:
+            return
+        self._settings.sequence_fps = new
+        self._update_cmd_preview()
+        self.emit("settings-changed")
+
+    def _on_seq_fps_preset_changed(self, dropdown: Gtk.DropDown, _pspec) -> None:
+        idx = dropdown.get_selected()
+        if not (0 <= idx < len(self._SEQ_FPS_PRESETS)):
+            return
+        new = self._SEQ_FPS_PRESETS[idx]
+        if abs(new - self._settings.sequence_fps) < 1e-4:
+            return
+        self._settings.sequence_fps = new
+        # Sync the spin button without retriggering settings-changed twice.
+        self._seq_fps_spin.handler_block(self._seq_fps_spin_handler)
+        try:
+            self._seq_fps_spin.set_value(new)
+        finally:
+            self._seq_fps_spin.handler_unblock(self._seq_fps_spin_handler)
+        self._update_cmd_preview()
+        self.emit("settings-changed")
+
     # ---------- auto-reveal toggle ----------
 
     def _build_auto_reveal_section(self) -> Gtk.Widget:
@@ -599,7 +722,30 @@ class SettingsPane(Gtk.Box):
     def _update_cmd_preview(self) -> None:
         if not hasattr(self, "_buffer"):
             return
-        if self._first_file_name:
+        if self._first_file_sequence is not None:
+            spec = self._first_file_sequence
+            # Reflect the spin button's current value in the preview, even if
+            # the FileEntry's spec was built with a different fps — the
+            # preview is forward-looking.
+            preview_spec = SequenceSpec(
+                dir=spec.dir,
+                prefix=spec.prefix,
+                ext=spec.ext,
+                padding=spec.padding,
+                start_frame=spec.start_frame,
+                frame_count=spec.frame_count,
+                expected_frames=spec.expected_frames,
+                fps=self._settings.sequence_fps,
+            )
+            suffix = f"_prores_{self._settings.profile}" if self._settings.naming == "suffix" else ""
+            out_path = f"{self._settings.out_dir.rstrip('/')}/{preview_spec.stripped_stem}{suffix}.mov"
+            text = format_preview_command(
+                preview_spec.first_frame_path, out_path,
+                self._settings.profile, self._settings.alpha,
+                audio_bits=self._settings.audio_bits,
+                sequence=preview_spec,
+            )
+        elif self._first_file_name:
             stem = Path(self._first_file_name).stem
             suffix = f"_prores_{self._settings.profile}" if self._settings.naming == "suffix" else ""
             out_path = f"{self._settings.out_dir.rstrip('/')}/{stem}{suffix}.mov"

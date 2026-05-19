@@ -116,6 +116,46 @@ class Metadata:
         return "—"
 
 
+@dataclass
+class SequenceSpec:
+    """A detected image sequence (group of numbered frames in a folder).
+
+    Built by `sequence_scan.scan_folder()`. Drives the ffmpeg image2-demuxer
+    input form: `-framerate FPS -start_number N -i <dir>/<prefix>%0Pd<ext>`.
+    """
+    dir: str             # absolute folder containing the frames
+    prefix: str          # stem before the digit run; "" if frames are pure digits
+    ext: str             # ".png" / ".exr" / ... (lowercase, leading dot)
+    padding: int         # 4 for shot_0001.png; 0 for unpadded
+    start_frame: int
+    frame_count: int     # frames actually found in the group
+    expected_frames: int # max - min + 1; > frame_count means there are gaps
+    fps: float           # at queue time, from settings.sequence_fps
+
+    @property
+    def pattern_basename(self) -> str:
+        digits = f"%0{self.padding}d" if self.padding > 0 else "%d"
+        return f"{self.prefix}{digits}{self.ext}"
+
+    @property
+    def pattern_path(self) -> str:
+        return str(Path(self.dir) / self.pattern_basename)
+
+    @property
+    def stripped_stem(self) -> str:
+        # Output naming base: trim trailing _ . - left after stripping digits.
+        # Pure-digit frames (prefix == "") fall back to the folder name.
+        return self.prefix.rstrip("_.-") or Path(self.dir).name
+
+    @property
+    def first_frame_path(self) -> str:
+        if self.padding > 0:
+            name = f"{self.prefix}{self.start_frame:0{self.padding}d}{self.ext}"
+        else:
+            name = f"{self.prefix}{self.start_frame}{self.ext}"
+        return str(Path(self.dir) / name)
+
+
 def probe_metadata(path: str) -> Metadata:
     """Run ffprobe synchronously. Callers should invoke from a worker thread.
 
@@ -178,6 +218,55 @@ def probe_metadata(path: str) -> Metadata:
     return meta
 
 
+def probe_sequence_metadata(spec: SequenceSpec) -> Metadata:
+    """Build a Metadata for an image sequence without running probe_metadata.
+
+    probe_metadata expects a single demuxable file; the image2-demuxer pattern
+    can't be ffprobed directly. We synthesise duration/fps from the spec, then
+    ffprobe just the first frame for width/height/pix_fmt (so the alpha flag
+    is accurate when the user picks 4444+alpha against a real RGBA EXR/PNG).
+    """
+    duration = spec.frame_count / spec.fps if spec.fps > 0 else 0.0
+    meta = Metadata(
+        duration=duration,
+        codec=spec.ext.lstrip(".").upper(),
+        fps=spec.fps,
+        audio_stream_indexes=[],
+    )
+    first = spec.first_frame_path
+    try:
+        proc = subprocess.run(
+            [
+                FFPROBE, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height,pix_fmt",
+                "-of", "json",
+                first,
+            ],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return meta
+    if proc.returncode != 0 or not proc.stdout:
+        return meta
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return meta
+    streams = data.get("streams") or []
+    if not streams:
+        return meta
+    stream = streams[0]
+    try:
+        meta.width = int(stream.get("width") or 0)
+        meta.height = int(stream.get("height") or 0)
+    except (TypeError, ValueError):
+        pass
+    pix_fmt = (stream.get("pix_fmt") or "").lower()
+    meta.alpha = _pix_fmt_has_alpha(pix_fmt)
+    return meta
+
+
 # Concrete pixel-format tokens that carry an alpha channel. The earlier
 # heuristic (`"a" in pix_fmt.split("p", 1)[0]`) misfired on grayscale formats
 # because "gray" contains the letter 'a'.
@@ -218,6 +307,13 @@ def _human_codec(name: str) -> str:
     return _CODEC_NAMES.get(name.lower(), name.upper() if name else "")
 
 
+def _format_fps(fps: float) -> str:
+    """ffmpeg-friendly fps string — int if whole, else 3-decimal."""
+    if fps == int(fps):
+        return str(int(fps))
+    return f"{fps:.3f}".rstrip("0").rstrip(".")
+
+
 def build_command(
     src: str,
     out: str,
@@ -226,6 +322,7 @@ def build_command(
     encoder: str,
     audio_indexes: Optional[list[int]] = None,
     audio_bits: int = 16,
+    sequence: Optional[SequenceSpec] = None,
 ) -> list[str]:
     """Assemble the ffmpeg command list for a single encode.
 
@@ -239,6 +336,10 @@ def build_command(
       audio_indexes is None          → fallback `-map 0:a:0?` (first audio,
                                         optional) for ad-hoc callers who
                                         haven't probed yet
+
+    `sequence`, when set, switches the input to the image2 demuxer
+    (`-framerate FPS -start_number N -i <pattern>`) and forces no-audio. The
+    `src` arg is ignored for sequences; pass the first-frame path or "" for it.
     """
     profile = PROFILES_BY_ID[profile_id]
     pix_fmt = pick_pixel_format(profile_id, alpha)
@@ -246,23 +347,38 @@ def build_command(
         FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
         "-nostdin",
     ]
-    hw = get_hwaccel()
-    if hw:
-        # ffmpeg silently falls back to CPU decode for codecs the GPU can't
-        # handle (MJPEG, ProRes input, etc.), so unconditional -hwaccel is safe.
-        cmd += ["-hwaccel", hw]
-    cmd += ["-i", src, "-map", "0:v:0"]
-
-    if audio_indexes is None:
-        # No probe info → safe fallback (first known audio, optional).
-        cmd += ["-map", "0:a:0?"]
-        has_audio = True
-    elif audio_indexes:
-        for idx in audio_indexes:
-            cmd += ["-map", f"0:{idx}"]
-        has_audio = True
-    else:
+    if sequence is not None:
+        # image2 demuxer: deterministic frame ordering via %0Nd, no hwaccel
+        # (it's decoder-side, irrelevant for still-image input), no audio.
+        # -vsync passthrough on EXR/DPX keeps ffmpeg from dropping/duplicating
+        # frames when the file mtimes look unusual.
+        if sequence.ext in (".exr", ".dpx"):
+            cmd += ["-vsync", "passthrough"]
+        cmd += [
+            "-framerate", _format_fps(sequence.fps),
+            "-start_number", str(sequence.start_frame),
+            "-i", sequence.pattern_path,
+            "-map", "0:v:0",
+        ]
         has_audio = False
+    else:
+        hw = get_hwaccel()
+        if hw:
+            # ffmpeg silently falls back to CPU decode for codecs the GPU can't
+            # handle (MJPEG, ProRes input, etc.), so unconditional -hwaccel is safe.
+            cmd += ["-hwaccel", hw]
+        cmd += ["-i", src, "-map", "0:v:0"]
+
+        if audio_indexes is None:
+            # No probe info → safe fallback (first known audio, optional).
+            cmd += ["-map", "0:a:0?"]
+            has_audio = True
+        elif audio_indexes:
+            for idx in audio_indexes:
+                cmd += ["-map", f"0:{idx}"]
+            has_audio = True
+        else:
+            has_audio = False
 
     if encoder == "ks":
         cmd += ["-c:v", "prores_ks", "-profile:v", profile.id, "-pix_fmt", pix_fmt]
@@ -285,16 +401,40 @@ def build_command(
     return cmd
 
 
-def format_preview_command(src_name: str, out_path: str, profile_id: str, alpha: bool, audio_bits: int = 16) -> str:
+def format_preview_command(
+    src_name: str,
+    out_path: str,
+    profile_id: str,
+    alpha: bool,
+    audio_bits: int = 16,
+    sequence: Optional[SequenceSpec] = None,
+) -> str:
     """Pretty multi-line preview for the ffmpeg command box. Uses prores_ks always.
 
     The real command maps each known audio stream by absolute index; the
     preview shows `0:a?` (glob-all) for brevity — the runtime behaviour is
     equivalent when every audio stream is known-codec.
+
+    When `sequence` is provided, renders the image2-demuxer form (no hwaccel,
+    no audio map / codec) using shlex-quoted pattern path.
     """
     profile = PROFILES_BY_ID[profile_id]
     pix_fmt = pick_pixel_format(profile_id, alpha)
     alpha_flag = " -alpha_bits 16" if (alpha and profile.pid >= 4) else ""
+    if sequence is not None:
+        vsync_line = "  -vsync passthrough \\\n" if sequence.ext in (".exr", ".dpx") else ""
+        return (
+            "ffmpeg -hide_banner -y \\\n"
+            + vsync_line
+            + f"  -framerate {_format_fps(sequence.fps)} \\\n"
+            + f"  -start_number {sequence.start_frame} \\\n"
+            + f"  -i {shlex.quote(sequence.pattern_path)} \\\n"
+            "  -map 0:v:0 \\\n"
+            f"  -c:v prores_ks -profile:v {profile.id} \\\n"
+            f"  -pix_fmt {pix_fmt}{alpha_flag} \\\n"
+            "  -movflags +use_metadata_tags \\\n"
+            f"  {shlex.quote(out_path)}"
+        )
     hw = get_hwaccel()
     hw_line = f"  -hwaccel {hw} \\\n" if hw else ""
     audio_codec = "pcm_s24le" if audio_bits == 24 else "pcm_s16le"
@@ -311,9 +451,19 @@ def format_preview_command(src_name: str, out_path: str, profile_id: str, alpha:
     )
 
 
-def plan_output_path(src: str, out_dir: str, naming: str, profile_id: str) -> str:
-    """Output path rules from prowrap-yad.sh: keep vs suffix, with ' (N)' disambiguation."""
-    stem = Path(src).stem
+def plan_output_path(
+    src: str,
+    out_dir: str,
+    naming: str,
+    profile_id: str,
+    stem_override: Optional[str] = None,
+) -> str:
+    """Output path rules from prowrap-yad.sh: keep vs suffix, with ' (N)' disambiguation.
+
+    `stem_override`, when given, replaces the filename-derived stem. Used for
+    image-sequence jobs where the "name" comes from a SequenceSpec, not a file.
+    """
+    stem = stem_override if stem_override is not None else Path(src).stem
     if naming == "suffix":
         base = f"{stem}_prores_{profile_id}"
     else:
@@ -344,6 +494,12 @@ class EncodeJob:
     # build_command can map each known audio stream by absolute index.
     # Empty list = silent video; None = no probe info (safe fallback applies).
     audio_stream_indexes: Optional[list[int]] = None
+    # When set, this is an image-sequence job, not a single-file job. `src`
+    # still carries the first-frame path (load-bearing for `_copy_mtime` and
+    # the orphan marker), but the ffmpeg input form switches to image2.
+    # `duration` should be set to `frame_count / fps` by the caller so the
+    # existing -progress parser produces correct percentages.
+    sequence: Optional[SequenceSpec] = None
     cancel_event: threading.Event = field(default_factory=threading.Event)
     _proc: Optional[subprocess.Popen] = None
 
@@ -363,7 +519,11 @@ def run_encode(job: EncodeJob, profile_id: str, alpha: bool, encoder: str, audio
         job.on_done(False, "cancelled")
         return
 
-    cmd = build_command(job.src, job.out, profile_id, alpha, encoder, job.audio_stream_indexes, audio_bits)
+    cmd = build_command(
+        job.src, job.out, profile_id, alpha, encoder,
+        job.audio_stream_indexes, audio_bits,
+        sequence=job.sequence,
+    )
     try:
         proc = subprocess.Popen(
             cmd,

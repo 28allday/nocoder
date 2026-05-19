@@ -55,6 +55,24 @@ def is_video_path(path: str) -> bool:
     return any(lower.endswith(ext) for ext in VIDEO_EXTENSIONS)
 
 
+# Image-sequence frame formats accepted by the "Add image sequence folder…"
+# entry point. ffmpeg's image2 demuxer handles all five natively; EXR/DPX
+# dither to 10-bit ProRes (lossless for 8-bit JPG/PNG, lossy headroom-wise
+# for floating-point EXR).
+SEQUENCE_EXTENSIONS: frozenset[str] = frozenset({
+    ".jpg", ".jpeg",
+    ".png",
+    ".tif", ".tiff",
+    ".exr",
+    ".dpx",
+})
+
+
+def is_sequence_frame_path(path: str) -> bool:
+    lower = path.lower()
+    return any(lower.endswith(ext) for ext in SEQUENCE_EXTENSIONS)
+
+
 # Subdirectory names to SKIP when recursively walking a dropped folder or
 # camera card. The names match case-insensitively.
 #

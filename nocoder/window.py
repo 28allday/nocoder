@@ -33,11 +33,14 @@ from .data import (
 )
 from .encoder import (
     EncodeJob,
+    SequenceSpec,
     detect_prores_encoder,
     plan_output_path,
     probe_metadata,
+    probe_sequence_metadata,
     run_encode,
 )
+from .sequence_scan import scan_folder, sum_frame_sizes
 from .footer import Footer
 from .queue_pane import FileEntry, QueuePane
 from .config import load_config, update_config
@@ -92,6 +95,10 @@ class MainWindow(Adw.ApplicationWindow):
         self._queue = QueuePane()
         self._queue.connect("add-files-requested", lambda *_: self._open_files_dialog())
         self._queue.connect("add-folder-requested", lambda *_: self._open_folder_dialog())
+        self._queue.connect(
+            "add-sequence-folder-requested",
+            lambda *_: self._open_sequence_folder_dialog(),
+        )
         self._queue.connect("clear-requested", lambda *_: self._clear_files())
         self._queue.connect("files-dropped", self._on_files_dropped)
         self._queue.connect("selection-changed", self._on_selection_changed)
@@ -251,8 +258,13 @@ class MainWindow(Adw.ApplicationWindow):
         if self._selected_id is not None:
             self._queue.set_selected(self._selected_id)
         self._queue.set_encoding(self._state == "encoding")
-        first_name = self._files[0].name if self._files else None
-        self._settings_pane.set_first_file_name(first_name)
+        first = self._files[0] if self._files else None
+        if first is not None:
+            self._settings_pane.set_first_file_name(
+                first.display_name, sequence=first.sequence,
+            )
+        else:
+            self._settings_pane.set_first_file_name(None)
         self._settings_pane.set_encoding(self._state == "encoding")
         self._settings_pane.refresh()
         self._footer.update(
@@ -367,6 +379,32 @@ class MainWindow(Adw.ApplicationWindow):
         paths.sort()
         self._add_paths(paths)
 
+    def _open_sequence_folder_dialog(self) -> None:
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Choose image-sequence folder")
+        dialog.set_modal(True)
+        dialog.select_folder(self, None, self._on_sequence_folder_chosen)
+
+    def _on_sequence_folder_chosen(self, dialog: Gtk.FileDialog, result) -> None:
+        try:
+            f = dialog.select_folder_finish(result)
+        except GLib.Error:
+            return
+        if f is None:
+            return
+        path = f.get_path()
+        if not path:
+            return
+        specs = scan_folder(path, self._settings.sequence_fps)
+        if not specs:
+            self._show_error(
+                f"No image sequences found in:\n{path}\n\n"
+                "Sequences are groups of ≥2 frames sharing a name prefix and "
+                "extension, ending in a digit run (e.g. shot_0001.png …)."
+            )
+            return
+        self._add_sequences(specs)
+
     def _open_out_dir_dialog(self) -> None:
         dialog = Gtk.FileDialog()
         dialog.set_title("Choose output folder")
@@ -436,6 +474,73 @@ class MainWindow(Adw.ApplicationWindow):
         for entry in added:
             self._probe_async(entry, mbps)
 
+    def _add_sequences(self, specs: list[SequenceSpec]) -> None:
+        # Dedupe by (dir + pattern_basename) so re-adding the same folder
+        # doesn't queue the same sequence twice. Realpath dedupe is wrong
+        # here because two sequences in the same folder share the parent
+        # path — the pattern is what makes them distinct.
+        existing = {
+            (f.sequence.dir, f.sequence.pattern_basename)
+            for f in self._files
+            if f.sequence is not None
+        }
+        mbps = PROFILES_BY_ID[self._settings.profile].mbps
+        added: list[FileEntry] = []
+        for spec in specs:
+            key = (spec.dir, spec.pattern_basename)
+            if key in existing:
+                continue
+            first = spec.first_frame_path
+            try:
+                size = sum_frame_sizes(spec)
+            except OSError:
+                size = 0
+            entry = FileEntry(path=first, size=size, sequence=spec)
+            entry.est_out = 0.0
+            self._files.append(entry)
+            existing.add(key)
+            added.append(entry)
+        if not added:
+            return
+        if self._state == "complete":
+            self._state = "ready"
+            self._reset_file_statuses()
+        self._refresh_all()
+        for entry in added:
+            self._probe_sequence_async(entry, mbps)
+
+    def _probe_sequence_async(self, entry: FileEntry, mbps: int) -> None:
+        spec = entry.sequence
+        assert spec is not None
+
+        def worker() -> None:
+            meta = probe_sequence_metadata(spec)
+
+            def apply() -> bool:
+                entry.meta = meta
+                entry.est_out = estimate_output_bytes(meta.duration, mbps)
+                self._queue.update_file(entry)
+                self._footer.update(
+                    state="ready" if self._state in ("empty", "ready") else self._state,
+                    files=self._files,
+                    profile_id=self._settings.profile,
+                    overall=self._overall_progress(),
+                    current_idx=self._current_idx,
+                )
+                first = self._files[0] if self._files else None
+                if first is not None:
+                    self._settings_pane.set_first_file_name(
+                        first.display_name, sequence=first.sequence,
+                    )
+                else:
+                    self._settings_pane.set_first_file_name(None)
+                return False
+
+            GLib.idle_add(apply)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+
     def _probe_async(self, entry: FileEntry, mbps: int) -> None:
         def worker() -> None:
             meta = probe_metadata(entry.path)
@@ -450,7 +555,13 @@ class MainWindow(Adw.ApplicationWindow):
                     overall=self._overall_progress(),
                     current_idx=self._current_idx,
                 )
-                self._settings_pane.set_first_file_name(self._files[0].name if self._files else None)
+                first = self._files[0] if self._files else None
+                if first is not None:
+                    self._settings_pane.set_first_file_name(
+                        first.display_name, sequence=first.sequence,
+                    )
+                else:
+                    self._settings_pane.set_first_file_name(None)
                 return False
             GLib.idle_add(apply)
         t = threading.Thread(target=worker, daemon=True)
@@ -541,11 +652,15 @@ class MainWindow(Adw.ApplicationWindow):
                 GLib.idle_add(self._finish_file, entry.id, False, "source file is missing")
                 continue
             GLib.idle_add(self._set_current_encoding, idx, entry.id)
+            stem_override = (
+                entry.sequence.stripped_stem if entry.sequence is not None else None
+            )
             out_path = plan_output_path(
                 entry.path,
                 self._settings.out_dir,
                 self._settings.naming,
                 self._settings.profile,
+                stem_override=stem_override,
             )
             done_event = threading.Event()
             result = {"ok": False, "err": None}
@@ -569,6 +684,7 @@ class MainWindow(Adw.ApplicationWindow):
                 on_done=on_done,
                 on_speed=on_speed,
                 audio_stream_indexes=list(entry.meta.audio_stream_indexes),
+                sequence=entry.sequence,
                 cancel_event=cancel,
             )
             # Track the active job so _on_close_request can cancel the live

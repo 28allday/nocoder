@@ -30,7 +30,7 @@ gi.require_version("GObject", "2.0")
 from gi.repository import GdkPixbuf, GLib, GObject, Gdk, Gio, Gtk
 
 from .data import VIDEO_EXTENSIONS, format_bytes, format_duration
-from .encoder import Metadata
+from .encoder import Metadata, SequenceSpec
 
 
 @dataclass
@@ -43,10 +43,20 @@ class FileEntry:
     status: str = "queued"  # queued | encoding | done | failed
     progress: float = 0.0   # 0..1
     error: Optional[str] = None
+    # When set, this entry is an image-sequence job. `path` still carries the
+    # first-frame path (load-bearing for dedupe, mtime copy, etc.); the
+    # `display_name` and the ffmpeg input form derive from the spec.
+    sequence: Optional[SequenceSpec] = None
 
     @property
     def name(self) -> str:
         return os.path.basename(self.path)
+
+    @property
+    def display_name(self) -> str:
+        if self.sequence is None:
+            return self.name
+        return f"{self.sequence.stripped_stem}{self.sequence.ext} ×{self.sequence.frame_count}"
 
 
 class QueuePane(Gtk.Box):
@@ -55,6 +65,7 @@ class QueuePane(Gtk.Box):
     __gsignals__ = {
         "add-files-requested": (GObject.SignalFlags.RUN_LAST, None, ()),
         "add-folder-requested": (GObject.SignalFlags.RUN_LAST, None, ()),
+        "add-sequence-folder-requested": (GObject.SignalFlags.RUN_LAST, None, ()),
         "clear-requested": (GObject.SignalFlags.RUN_LAST, None, ()),
         "files-dropped": (GObject.SignalFlags.RUN_LAST, None, (object,)),
         "selection-changed": (GObject.SignalFlags.RUN_LAST, None, (str,)),
@@ -121,6 +132,18 @@ class QueuePane(Gtk.Box):
         add_folder.set_child(_icon_label("folder-symbolic", "Add folder"))
         add_folder.connect("clicked", lambda _b: self.emit("add-folder-requested"))
         self._action_bar.append(add_folder)
+
+        add_sequence = Gtk.Button()
+        add_sequence.add_css_class("muted-btn")
+        add_sequence.set_child(_icon_label("image-x-generic-symbolic", "Add image sequence"))
+        add_sequence.set_tooltip_text(
+            "Pick a folder of numbered image frames (JPG/PNG/TIFF/EXR/DPX). "
+            "Frame rate comes from the Sequence FPS setting."
+        )
+        add_sequence.connect(
+            "clicked", lambda _b: self.emit("add-sequence-folder-requested")
+        )
+        self._action_bar.append(add_sequence)
 
         spacer = Gtk.Box()
         spacer.set_hexpand(True)
@@ -196,6 +219,17 @@ class QueuePane(Gtk.Box):
         secondary.set_child(_icon_label("folder-symbolic", "Add folder"))
         secondary.connect("clicked", lambda _b: self.emit("add-folder-requested"))
         buttons.append(secondary)
+
+        sequence_btn = Gtk.Button()
+        sequence_btn.add_css_class("muted-btn")
+        sequence_btn.set_child(_icon_label("image-x-generic-symbolic", "Image sequence"))
+        sequence_btn.set_tooltip_text(
+            "Pick a folder of numbered image frames (JPG/PNG/TIFF/EXR/DPX)."
+        )
+        sequence_btn.connect(
+            "clicked", lambda _b: self.emit("add-sequence-folder-requested")
+        )
+        buttons.append(sequence_btn)
         drop.append(buttons)
 
         hint = Gtk.Label()
@@ -560,7 +594,7 @@ def _icon_label(icon_name: str, text: str) -> Gtk.Widget:
 
 
 def _populate_row(row: Gtk.ListBoxRow, entry: FileEntry, widgets: dict) -> None:
-    widgets["name"].set_text(entry.name)
+    widgets["name"].set_text(entry.display_name)
     # Meta
     meta_box: Gtk.Box = widgets["meta_box"]
     _clear_children(meta_box)
@@ -575,6 +609,17 @@ def _populate_row(row: Gtk.ListBoxRow, entry: FileEntry, widgets: dict) -> None:
         parts.append((format_duration(entry.meta.duration), None))
     if entry.meta.alpha:
         parts.append(("α", "alpha-mark"))
+    if entry.sequence is not None:
+        # Surface the frame count + any gap warning. The frame_count vs
+        # expected_frames divergence is informational — ffmpeg will halt at
+        # the first missing frame, so the user wants to know up front.
+        spec = entry.sequence
+        if spec.frame_count == spec.expected_frames:
+            parts.append((f"{spec.frame_count} frames", None))
+        else:
+            parts.append(
+                (f"{spec.frame_count}/{spec.expected_frames} frames", "alpha-mark")
+            )
     if not parts:
         lbl = Gtk.Label(label="probing…", xalign=0)
         meta_box.append(lbl)

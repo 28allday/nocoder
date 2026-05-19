@@ -13,7 +13,8 @@ Schema (all keys optional):
         "naming":  "suffix" | "keep",
         "audio_bits": 16 | 24,
         "auto_reveal": false,
-        "cpu_pane_expanded": true
+        "cpu_pane_expanded": true,
+        "sequence_fps": 24.0
     }
 """
 from __future__ import annotations
